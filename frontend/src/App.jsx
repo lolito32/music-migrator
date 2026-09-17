@@ -1,66 +1,36 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import './App.css'
-
-const PLATFORMS = [
-  { id: 'spotify', name: 'Spotify', available: true },
-  { id: 'tidal', name: 'Tidal', available: true },
-  { id: 'youtube-music', name: 'YouTube Music', available: false },
-  { id: 'apple-music', name: 'Apple Music', available: false },
-  { id: 'deezer', name: 'Deezer', available: false },
-]
-
-const PLAYLISTS = [
-  { id: 1, name: 'Mañana en la ciudad', tracks: 48 },
-  { id: 2, name: 'Foco y trabajo', tracks: 22 },
-  { id: 3, name: 'Clásicos de los 2000', tracks: 67 },
-  { id: 4, name: 'Encuentros', tracks: 31 },
-]
+import { PLATFORMS, getPlatform, platformName } from './constants/platforms'
+import { PLAYLISTS } from './constants/mockPlaylists'
+import { Header } from './components/common/Header'
+import { Footer } from './components/common/Footer'
+import { Stepper } from './components/common/Stepper'
+import { TransferArrow } from './components/common/Icons'
+import { PlatformSelector } from './components/migration/PlatformSelector'
+import { PlaylistSelector } from './components/migration/PlaylistSelector'
+import { AuthCard } from './components/auth/AuthCard'
+import { useTheme } from './hooks/useTheme'
+import { usePlatformAuth } from './hooks/usePlatformAuth'
 
 const STEPS = ['Origen', 'Destino', 'Playlist']
 
-function platformName(id) {
-  const found = PLATFORMS.find((platform) => platform.id === id)
-  return found ? found.name : ''
-}
-
-function Check() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-      <path
-        d="M2 5l2 2 4-4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
 function App() {
-  const [theme, setTheme] = useState(() => {
-    const saved = window.localStorage.getItem('mm-theme')
-    if (saved === 'light' || saved === 'dark') return saved
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark'
-      : 'light'
-  })
+  const { theme, toggleTheme } = useTheme()
   const [source, setSource] = useState(null)
   const [target, setTarget] = useState(null)
   const [playlist, setPlaylist] = useState(null)
   const [hint, setHint] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const {
+    status: authStatus,
+    info: authInfo,
+    user: authUser,
+    error: authError,
+    startAuth,
+    checkAuth,
+    reset: resetAuth,
+  } = usePlatformAuth()
   const hintTimer = useRef(null)
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    window.localStorage.setItem('mm-theme', theme)
-  }, [theme])
-
-  function toggleTheme() {
-    setTheme((current) => (current === 'light' ? 'dark' : 'light'))
-  }
 
   function flashHint(message) {
     setHint(message)
@@ -68,11 +38,41 @@ function App() {
     hintTimer.current = window.setTimeout(() => setHint(''), 3400)
   }
 
+  const sourcePlatform = source ? getPlatform(source) : null
+  const requiresAuth = Boolean(sourcePlatform && sourcePlatform.requiresAuth)
+  const authReady = !requiresAuth || authStatus === 'authenticated'
+  const playlistsEnabled = Boolean(source) && authReady
+  const stepsDone = [Boolean(source), Boolean(target), Boolean(playlist)]
+  const currentStep = stepsDone.findIndex((done) => !done)
+  const currentStepIndex = currentStep === -1 ? 0 : currentStep
+  const selectedPlaylist = playlist
+    ? PLAYLISTS.find((item) => item.id === playlist)
+    : null
+  const ready = Boolean(source && target && playlist)
+
+  let note = ''
+  if (!source) {
+    note = 'Selecciona primero una plataforma de origen.'
+  } else if (requiresAuth && authStatus !== 'authenticated') {
+    note = `Conecta tu cuenta de ${sourcePlatform.name} para poder ver tus playlists.`
+  } else if (!target) {
+    note = 'Selecciona ahora una plataforma de destino.'
+  } else if (!playlist) {
+    note = 'Por último, elige una playlist para migrar.'
+  }
+
+  const playlistNote = !playlistsEnabled
+    ? requiresAuth && authStatus !== 'authenticated'
+      ? `Conecta tu cuenta de ${sourcePlatform.name} para cargar tus playlists.`
+      : 'Selecciona una plataforma de origen para cargar tus playlists.'
+    : ''
+
   function chooseSource(id) {
     if (source === id) {
       setSource(null)
       setPlaylist(null)
       setSubmitted(false)
+      resetAuth()
       return
     }
     if (id === target) {
@@ -82,6 +82,12 @@ function App() {
     setSource(id)
     setPlaylist(null)
     setSubmitted(false)
+    const platform = getPlatform(id)
+    if (platform.requiresAuth) {
+      startAuth(platform)
+    } else {
+      resetAuth()
+    }
   }
 
   function chooseTarget(id) {
@@ -98,119 +104,21 @@ function App() {
     setSubmitted(false)
   }
 
-  const ready = Boolean(source && target && playlist)
-  const playlistsEnabled = Boolean(source)
-  const stepsDone = [Boolean(source), Boolean(target), Boolean(playlist)]
-  const currentStep = stepsDone.findIndex((done) => !done)
-  const currentStepIndex = currentStep === -1 ? 0 : currentStep
-  const selectedPlaylist = playlist
-    ? PLAYLISTS.find((item) => item.id === playlist)
-    : null
-
-  let note = ''
-  if (!source) {
-    note = 'Selecciona primero una plataforma de origen.'
-  } else if (!target) {
-    note = 'Selecciona ahora una plataforma de destino.'
-  } else if (!playlist) {
-    note = 'Por último, elige una playlist para migrar.'
+  function choosePlaylist(id) {
+    setPlaylist(id)
+    setSubmitted(false)
   }
 
-  function renderPlatformOption(side, platform) {
-    const selecting = side === 'source'
-    const isSelected = selecting ? source === platform.id : target === platform.id
-
-    return (
-      <button
-        key={platform.id}
-        type="button"
-        className={
-          'platform-option' +
-          (isSelected ? ' selected' : '') +
-          (platform.available ? '' : ' soon')
-        }
-        disabled={!platform.available}
-        aria-pressed={isSelected}
-        onClick={() => (selecting ? chooseSource : chooseTarget)(platform.id)}
-      >
-        <span className="opt-indicator">{isSelected ? <Check /> : null}</span>
-        <span className="opt-name">{platform.name}</span>
-        {!platform.available ? <span className="opt-tag">Próximamente</span> : null}
-      </button>
-    )
+  function cancelAuth() {
+    resetAuth()
+    setSource(null)
+    setPlaylist(null)
+    setSubmitted(false)
   }
 
   return (
     <>
-      <header className="site-header">
-        <div className="shell header-inner">
-          <div className="brand">
-            <svg
-              className="brand-mark"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <rect
-                x="3"
-                y="3"
-                width="18"
-                height="18"
-                rx="4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-              />
-              <path
-                d="M6 12h10m0 0l-4-4m4 4l-4 4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span>Music Migrator</span>
-          </div>
-          <button
-            type="button"
-            className="theme-toggle"
-            onClick={toggleTheme}
-            aria-label={theme === 'light' ? 'Activar modo oscuro' : 'Activar modo claro'}
-          >
-            {theme === 'light' ? (
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M13.4 10.6A6 6 0 1 1 5.4 2.6a4.9 4.9 0 0 0 8 8z" />
-              </svg>
-            ) : (
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                aria-hidden="true"
-              >
-                <circle cx="8" cy="8" r="3.2" />
-                <path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1" />
-              </svg>
-            )}
-          </button>
-        </div>
-      </header>
+      <Header theme={theme} onToggleTheme={toggleTheme} />
 
       <main className="shell">
         <section className="hero">
@@ -223,120 +131,53 @@ function App() {
         </section>
 
         <section className="schema-card" aria-label="Configurador de migración">
-          <div className="steps">
-            {STEPS.map((label, index) => {
-              const done = stepsDone[index]
-              const isCurrent = index === currentStepIndex
-              return (
-                <Fragment key={label}>
-                  {index > 0 ? <span className="step-line" aria-hidden="true" /> : null}
-                  <span
-                    className={
-                      'step-node' +
-                      (done ? ' done' : '') +
-                      (isCurrent ? ' current' : '')
-                    }
-                  >
-                    <span className="step-index">
-                      {done ? <Check /> : `0${index + 1}`}
-                    </span>
-                    <span className="step-label">{label}</span>
-                  </span>
-                </Fragment>
-              )
-            })}
-          </div>
+          <Stepper steps={STEPS} done={stepsDone} currentIndex={currentStepIndex} />
 
           {hint ? <p className="hint">{hint}</p> : null}
 
           <div className="card-section">
             <div className="panel-grid">
-              <div>
-                <div className="panel-head">
-                  <h3>Plataforma de origen</h3>
-                  <span className="panel-val">
-                    {source ? platformName(source) : 'Sin seleccionar'}
-                  </span>
-                </div>
-                <div className="platform-list">
-                  {PLATFORMS.map((platform) =>
-                    renderPlatformOption('source', platform),
-                  )}
-                </div>
-              </div>
-
+              <PlatformSelector
+                label="Plataforma de origen"
+                value={source}
+                platforms={PLATFORMS}
+                onSelect={chooseSource}
+              />
               <div className="transfer" aria-hidden="true">
-                <svg width="22" height="22" viewBox="0 0 24 24">
-                  <path
-                    d="M4 12h15m0 0l-5-5m5 5l-5 5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+                <TransferArrow />
               </div>
-
-              <div>
-                <div className="panel-head">
-                  <h3>Plataforma de destino</h3>
-                  <span className="panel-val">
-                    {target ? platformName(target) : 'Sin seleccionar'}
-                  </span>
-                </div>
-                <div className="platform-list">
-                  {PLATFORMS.map((platform) =>
-                    renderPlatformOption('target', platform),
-                  )}
-                </div>
-              </div>
+              <PlatformSelector
+                label="Plataforma de destino"
+                value={target}
+                platforms={PLATFORMS}
+                onSelect={chooseTarget}
+              />
             </div>
           </div>
 
+          {requiresAuth ? (
+            <div className="card-section">
+              <AuthCard
+                platform={sourcePlatform}
+                status={authStatus}
+                info={authInfo}
+                user={authUser}
+                error={authError}
+                onStart={() => startAuth(sourcePlatform)}
+                onCheck={checkAuth}
+                onCancel={cancelAuth}
+              />
+            </div>
+          ) : null}
+
           <div className="card-section">
-            <div className="panel-head">
-              <h3>Playlist</h3>
-              <span className="panel-val">
-                {selectedPlaylist
-                  ? `${selectedPlaylist.name} · ${selectedPlaylist.tracks} canciones`
-                  : 'Sin seleccionar'}
-              </span>
-            </div>
-            {!playlistsEnabled ? (
-              <p className="playlist-note">
-                Selecciona una plataforma de origen para cargar tus playlists.
-              </p>
-            ) : null}
-            <div className={playlistsEnabled ? 'playlist-list' : 'playlist-list disabled'}>
-              {PLAYLISTS.map((item) => {
-                const isSelected = playlist === item.id
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={'playlist-row' + (isSelected ? ' selected' : '')}
-                    disabled={!playlistsEnabled}
-                    aria-pressed={isSelected}
-                    onClick={() => {
-                      setPlaylist(isSelected ? null : item.id)
-                      setSubmitted(false)
-                    }}
-                  >
-                    <span className="playlist-cover" aria-hidden="true" />
-                    <span className="playlist-meta">
-                      <span className="playlist-name">{item.name}</span>
-                      <span className="playlist-count">
-                        {item.tracks} canciones
-                      </span>
-                    </span>
-                    <span className="playlist-check">
-                      {isSelected ? <Check /> : null}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
+            <PlaylistSelector
+              playlists={PLAYLISTS}
+              value={playlist}
+              enabled={playlistsEnabled}
+              note={playlistNote}
+              onSelect={choosePlaylist}
+            />
           </div>
 
           <div className="card-section">
@@ -381,12 +222,7 @@ function App() {
         </section>
       </main>
 
-      <footer className="site-footer">
-        <div className="shell footer-inner">
-          <p>Music Migrator</p>
-          <p>Prototipo de interfaz. El backend se integrará en fases posteriores.</p>
-        </div>
-      </footer>
+      <Footer />
     </>
   )
 }
