@@ -22,6 +22,12 @@ htmlcov/
 !.env.example
 
 # =========================
+# Sessions / Tokens
+# =========================
+tidal_session.json
+*_session.json
+
+# =========================
 # Node / Frontend
 # =========================
 node_modules/
